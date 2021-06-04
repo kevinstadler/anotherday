@@ -1,0 +1,54 @@
+## First sensor data format analysis
+
+```{r}
+readdata <- function(filename) {
+  d <- read.csv(filename)[-1:-99,]
+  d$v <- d$voltage * .005
+#  d$minutessinceboot <- (d$ts + d$seconds - min(d$ts)) / 3600
+  d$t <- structure(d$ts + d$seconds, class=c('POSIXt','POSIXct'))
+  return(d)
+}
+
+```
+
+### Time-keeping
+
+Discontinuities at the new data points.
+
+```{r timekeeping}
+d <- readdata('outdoor40s.csv')
+plot(ts ~ boot, d, type='l')
+lines(t ~ boot, d, lty=2)
+```
+
+### Lux
+
+```{r measurements40s, fig.width=10, fig.height=15}
+par(mfrow=c(5, 1), mar=c(2, 5, 0, 0))
+plot(lux ~ t, subset(d, lux > 0), xlim=range(d$t), type="l", log="y")
+plot(kelvin ~ t, subset(d, lux > 10), xlim=range(d$t), type="l")
+plot(temp ~ t, subset(d, temp > 0), xlim=range(d$t), type="l")
+plot(humidity ~ t, subset(d, humidity > 0), xlim=range(d$t), type="l")
+plot(v ~ t, d, xlim=range(d$t), type="l")
+abline(h=4.6, lty=2)
+```
+
+### Voltage (power consumption & battery charging)
+
+As long as the ESP8266 only wakes to take measurements, it does not draw enough current to turn on the TP4056 to recharge the battery. When the WiFi modem goes on though it triggers the TP4056 and starts a (brief) battery cycle until the battery is completely full again.
+
+
+## Longer period
+
+```{r measurements20s, fig.width=10, fig.height=15}
+d <- readdata('outdoor20s.csv')
+par(mfrow=c(5, 1), mar=c(2, 5, 0, 0))
+plot(lux ~ t, subset(d, lux > 0), xlim=range(d$t), type="l", log="y")
+plot(kelvin ~ t, subset(d, lux > 10), xlim=range(d$t), type="l")
+plot(temp ~ t, subset(d, temp > 0), xlim=range(d$t), type="l")
+plot(humidity ~ t, subset(d, humidity > 0), xlim=range(d$t), type="l")
+plot(v ~ t, d, xlim=range(d$t), type="l")
+abline(h=4.6, lty=2)
+```
+
+The very last plot shows longer durations of more intense battery drain over night when the ESP8266 managed to connect to the Wifi, but the target computer to receive the sensor data over HTTP was down, leading to resubmission attempt on every single reboot.

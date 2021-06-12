@@ -1,0 +1,93 @@
+## First sensor data format analysis
+
+```{r}
+readdata <- function(filename) {
+  d <- read.csv(filename)
+  d$v <- d$voltage * .005
+#  d$minutessinceboot <- (d$ts + d$seconds - min(d$ts)) / 3600
+  d$t <- structure(d$ts + d$seconds, class=c('POSIXt','POSIXct'))
+  return(d)
+}
+```
+
+### Time-keeping
+
+Discontinuities at the new data points.
+
+```{r timekeeping}
+d <- readdata('outdoor40s.csv')
+plot(ts ~ boot, d, type='l')
+lines(t ~ boot, d, lty=2)
+```
+
+### Lux
+
+This first set of data suffered from overly strong direct sunlight in the morning.
+
+```{r measurements40s, fig.width=10, fig.height=15}
+par(mfrow=c(5, 1), mar=c(2, 5, 0, 0))
+plot(lux ~ t, subset(d, lux > 0), xlim=range(d$t), pch='.', log="y")
+plot(kelvin ~ t, subset(d, lux > 5), xlim=range(d$t), pch='.')
+plot(temp ~ t, subset(d, temp > 0), xlim=range(d$t), pch='.')
+plot(humidity ~ t, subset(d, humidity > 0), xlim=range(d$t), pch='.')
+plot(v ~ t, d, xlim=range(d$t), pch='.')
+abline(h=4.6, lty=2)
+```
+
+### Voltage (power consumption & battery charging)
+
+As long as the ESP8266 only wakes to take measurements, it does not draw enough current to turn on the TP4056 to recharge the battery. When the WiFi modem goes on though it triggers the TP4056 and starts a (brief) battery cycle until the battery is completely full again.
+
+(Rprog is 10k, i.e. charging current of 130mA at 4.6V, TP4056 enables charging anytime the current draw from the circuit is > 13mA).
+
+## Longer period
+
+```{r measurements20s, fig.width=10, fig.height=15}
+d <- readdata('outdoor20s.csv')
+par(mfrow=c(5, 1), mar=c(2, 5, 0, 0))
+plot(lux ~ t, subset(d, lux > 0), xlim=range(d$t), pch='.', log="y")
+plot(kelvin ~ t, subset(d, lux > 5), xlim=range(d$t), pch='.')
+plot(temp ~ t, subset(d, temp > 0), xlim=range(d$t), pch='.')
+plot(humidity ~ t, subset(d, humidity > 0), xlim=range(d$t), pch='.')
+plot(v ~ t, d, xlim=range(d$t), pch='.')
+abline(h=4.6, lty=2)
+```
+
+The very last plot shows longer durations of more intense battery drain over night when the ESP8266 managed to connect to the Wifi, but the target computer to receive the sensor data over HTTP was down, leading to resubmission attempt on every single reboot.
+
+## Raw data analysis
+
+```{r, fig.width=10, fig.height=15}
+d <- readdata('outdoorraw.csv')
+d$overflow <- d$c == 2048 & d$integrationtime == 4.8
+cols <- c('red', 'black')
+
+df <- 310
+ct <- 3810
+ctoff <- 1391
+calculate <- function(d) {
+  d$ir <- (d$r + d$g + d$b - d$c) / 2
+  d$rb <- d$r - d$ir
+  d$gb <- d$g - d$ir
+  d$bb <- d$b - d$ir
+  d$cpl <- d$gain * d$integrationtime / df
+  d$lux <- (.136 * d$rb + 1 * d$gb - .444 * d$bb) / d$cpl
+  d$der <- 2 / d$cpl # lux digitization error +-
+  d$kelvin <- ct * d$bb / d$rb + ctoff
+  return(d)
+}
+
+d <- calculate(d)
+par(mfrow=c(3, 1), mar=c(2, 5, 0, 0))
+plot(lux ~ t, subset(d, c > 10), xlim=range(d$t), pch='.', log="y", col=cols[2 - d$overflow])
+plot(kelvin ~ t, subset(d, lux > 1), xlim=range(d$t), pch='.', col=cols[2 - d$overflow])
+plot(v ~ t, d, xlim=range(d$t), pch='.')
+abline(h=4.6, lty=2)
+```
+
+```{r}
+summary(lm(c ~ r + g + b, subset(d, c < 2048)))
+
+summary(lm(c ~ r + g + b, subset(d, c > 1700 & c < 2048)))
+
+```

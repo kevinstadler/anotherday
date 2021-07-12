@@ -1,130 +1,173 @@
-// _INTERVAL constants
-#include "timing.h"
+//#define DEBUG 1
+#ifdef DEBUG
+  #define DEBUG_PRINT(x)  Serial.print(x)
+  #define DEBUG_PRINTLN(x)  Serial.println(x)
+#else
+  #define DEBUG_PRINT(x)
+  #define DEBUG_PRINTLN(x)
+#endif
 
 // RTC memory data storage between reboots
 #include "rtc.h"
+// _INTERVAL constants
+#include "timing.h"
 
 // connection
 #include "wifi.h"
-// file persistence
-#include <FS.h>
-#define FILE "/light.txt"
-File file;
 
-#include "TCS34725.h"
-TCS34725 tcs;
+#include "spiffs.h"
 #include "light.h"
 
 #include <DHTesp.h>
 DHTesp dht;
 TempAndHumidity dhtData;
 
+uint16_t v;
+
 void setup() {
-  // TODO if voltage is too low, go straight to sleep
-  
-  Serial.begin(74880);
+  // if voltage is too low, go straight to sleep for an hour
+  v = getVoltage();
+  if (v < 700) {
+    sleep(60*MINUTE);
+  }
+
+  #ifdef DEBUG
+    Serial.begin(115200);
+    Serial.println();
+  #endif
  
-  if (data->networkTime == 0 || !ESP.getResetReason().equals("Deep-Sleep Wake")) {
-    Serial.println("Resetting");
-    data->sleepTime = RESET_INTERVAL;
-    data->resetCount = 0;
+  if (!ESP.getResetReason().equals("Deep-Sleep Wake")) {
+    DEBUG_PRINTLN("Looks like first boot, initialising.");
+    delay(2000); // give some time to flash
+    data->networkTime = 0;
     data->msSinceNetworkTime = - millis();
-    data->uploadAttempts = 0;
+    data->bootCount = 0;
+    data->nextUpload = 0;
+    data->nextAir = 0;
+    data->readInterval = RESET_INTERVAL;
+    data->lastLux = 0;
+    data->lastCct = 0;
+    data->uploadAttempt = 0;
+    data->cacheCount = 0;
+
+//    DEBUG_PRINTLN(sizeof(*(&nv->wss))); // 152
+    DEBUG_PRINTLN(sizeof(*(&nv->rtcData))); // 40
+    DEBUG_PRINTLN(sizeof(*(&nv->cache))); // 120 for 6
+    DEBUG_PRINTLN(sizeof(*nv)); // 304 for 6
+
+    // TODO fix disconnect bug: https://github.com/esp8266/Arduino/issues/5527
+    // https://github.com/esp8266/Arduino/issues/2235#issuecomment-248916617 says to just call disconnect() beforehand.
     // connect to wifi
     getTime();
+    if (data->networkTime == 0) {
+      // buhao
+      data->readInterval = max(data->readInterval, data->readInterval << 1);
+      DEBUG_PRINTLN("Initial clock check failed, scheduling another connection in 2");
+      data->nextUpload += 2;
+    }
   }
+}
 
-  if (data->networkTime == 0) {
-    data->sleepTime *= 2;
-    Serial.println("Sleeping prematurely");
-    sleep();
-    // buhao
-  }
+void loop() {
+  int fileSize = 0;
+  // if it's data worth writing OR we're about to upload OR we haven't written in zonks
+  if (getLight()) {// || shouldUpload() || (data->bootCount % 50) == 0) {
+    DEBUG_PRINT("Writing to cache slot ");
+    DEBUG_PRINT(data->cacheCount);
+    cache[data->cacheCount].bootCount = data->bootCount;
+    cache[data->cacheCount].sSinceNetworkTime = (data->msSinceNetworkTime + millis()) / 1000;
+    cache[data->cacheCount].gainCyclesV = (gain << 24) | (nCycles << 16) | v;
+    cache[data->cacheCount].cr = (raw.c << 16) | raw.r;
+    cache[data->cacheCount].gb = (raw.g << 16) | raw.b;
 
-//  Serial.print("Reset #");
-//  Serial.println(data->resetCount);
+    // persistence and/or upload
+    if (++data->cacheCount == LOG_CACHE || shouldUpload()) {
+      if (!SPIFFS.begin()) {
+        DEBUG_PRINTLN("SPIFFS error, shutting down");
+        sleep(0);
+      }
+      DEBUG_PRINTLN("Persisting cache");
 
-  SPIFFS.begin();
-  file = SPIFFS.open(FILE, "a");
-  file.print(data->resetCount);
-  file.print(",");
-  if (data->uploadAttempts >= 0) {
-    file.print(data->uploadAttempts);
-  }
-  file.print(",");
-  file.print(data->networkTime);
-  file.print(",");
-  file.print((data->msSinceNetworkTime + millis()) / 1000);
-  file.print(",");
+      #ifdef DEBUG
+        FSInfo info;
+        SPIFFS.info(info);
+        DEBUG_PRINT("SPIFFS status: ");
+        DEBUG_PRINT(info.usedBytes);
+        DEBUG_PRINT(" bytes used of total ");
+        DEBUG_PRINTLN(info.totalBytes);
+      #endif
+      File file = SPIFFS.open(FILE, "a");
 
-  getLight(file);
-//  file.print(data->lux[data->resetCount % N_RECORDS]);
-//  file.print(",");
-//  file.print(data->cct[data->resetCount % N_RECORDS]);
+      // pre-log timestamp to the first line that will be persisted
+      if (data->bootCount == 0 || file.size() == 0) {
+        file.print(data->msSinceNetworkTime);
+      }
 
-  file.print(",");
+      // don't need to get temperature every time -- every 5.something minutes max,
+      // and only if we have enough time (3 seconds) between light data reads
+      bool logAir = data->msSinceNetworkTime >= data->nextAir && data->readInterval >= 3e3;
 
-  // FIXME only measure voltage if wifi is on?
-  getVoltage();
-  file.print(data->v[data->resetCount % N_RECORDS]);
-  file.print(",");
-
-  // don't need to get temperature every time -- every 5.something minutes max
-  if (data->shouldUpload >= 0 || (data->resetCount * data->sleepTime) % 320 == 0) {
-    getAir();
-    file.print(dhtData.temperature);
-    file.print(",");
-    file.print((int16_t) dhtData.humidity);
-  } else {
-    file.print(",");
-  }
-  file.println();
-
-  int fileSize = file.size();
-  file.close();
-
-  // TODO check if Wifi (modem) is on instead?
-  if (data->uploadAttempts >= 0) {
-    // TODO incorporate time correction (RTC drift)?
-    if (uploadFile(FILE) != 0) {
-      fileSize = 0;
-      data->uploadAttempts = -1;
-    } else {
-      data->uploadAttempts++;
+      bool leaveOpen = logAir || shouldUpload();
+      persistCache(&file, leaveOpen);
+      if (leaveOpen) {
+        file.print('\t');
+        getAir();
+        file.print(dhtData.temperature);
+        file.print('\t');
+        file.print((int16_t) dhtData.humidity);
+        data->nextAir = data->msSinceNetworkTime + AIR_INTERVAL;
+        file.print('\t');
+        if (shouldUpload()) {
+          file.print(++(data->uploadAttempt));
+        }
+        file.println();
+      }
+    
+      fileSize = file.size();
+      file.close();
+    
+      // at 5k filesize constraint and 40 sec write interval there was one upload every ~1.2 hours,
+      // each of which triggered the battery to recharge again.
+      if (shouldUpload()) {
+        digitalWrite(D4, false);
+        if (uploadFile() != 0) {
+          fileSize = 0;
+          data->uploadAttempt = 0;
+        } else {
+          // exponentially delay upload
+          setNextUpload(data->nextUpload + ( data->uploadAttempt >= 32 ? 255 : (1 << data->uploadAttempt)));
+        }
+        digitalWrite(D4, true);
+      }
+      SPIFFS.end();
     }
   }
 
-  // at 5k filesize constraint and 40 sec write interval there was one upload every ~1.2 hours,
-  // each of which triggered the battery to recharge again.
-  // TODO add OR 1h expired?
-  if (data->uploadAttempts >= 0) {
-    data->uploadAttempts++;
-  } else if (data->resetCount == 0 ||
-             ((data->v[data->resetCount % N_RECORDS] >= 740 && fileSize > 20000))) {
-    data->uploadAttempts = 0;
+  // decide if next reboot should be upload
+  if (v >= 740 && // enough power
+      data->readInterval > 10e3 && // at least 10s read interval so we don't mess up dense readings
+      // consider next upload time -- 50KB size or 1 hour, whichever comes first
+      (fileSize > 50000 || data->msSinceNetworkTime >= 60*60e3)) {
+    DEBUG_PRINTLN("Attempting to queue upload at next reboot");
+    setNextUpload(data->bootCount + 1);
   }
 
-  // TODO calculate deep sleep time based on battery voltage
-  // https://electronics.stackexchange.com/questions/32321/lipoly-battery-when-to-stop-draining
-
-  data->sleepTime = RESET_INTERVAL;
+  DEBUG_PRINTLN();
   sleep();
 }
 
-void getVoltage() {
-  // 5.09 (usb) = 1016/1017
-  // 4.18 (batt no load) = 834/835
-  // 4.15 (batt w/ load) = 831
-  data->v[data->resetCount % N_RECORDS] = analogRead(A0);
-  // * .005 to get to voltage, +- 2%ish
-  // => 4.2V = 840
-  // => 4V = 800 (at least 85% battery here)
-}
+// * .005 to get to voltage, +- 2%ish
+// 5.09 (usb) = 1016/1017
+// 4.18 (batt no load) = 834/835
+// 4.15 (batt w/ load) = 831
 // 3.9 -> 80% (780)
 // 3.8 -> 60% (760)
 // 3.7 -> 40% (740)
 // 3.6 -> 20% (720)
 // 3.5 -> 10% (700)
+uint16_t getVoltage() {
+  return analogRead(A0);
+}
 
 void getAir() {
   pinMode(D7, OUTPUT);
@@ -134,12 +177,8 @@ void getAir() {
   delay(1000);
   dhtData = dht.getTempAndHumidity();
   if (dht.getStatus() != DHTesp::ERROR_NONE) {
-    Serial.printf("Error reading local sensor: %s\n", dht.getStatusString());
+    DEBUG_PRINTLN("Error reading local sensor");
+    // dht.getStatusString()
   }
   digitalWrite(D7, LOW);
-}
-
-void loop() {
-  // should not get here
-  sleep(0);
 }

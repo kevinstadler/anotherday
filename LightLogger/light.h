@@ -1,80 +1,54 @@
-// can only accumulate 1024 per 2.4ms, so start at 4.8ms
-#define REQUIRED_COUNT 1000
+#include "TCS34725.h"
+#include "TCS34725AutoGain.h"
 
-void getLight(File file) {
+TCS34725::RawData raw;
+
+#define INTERVAL_INCREASE 1
+#define INTERVAL_DECREASE 2
+#define LIGHT_LOG 4
+
+// return true if there is new data that is significantly different from the last logged one to be worth logging
+bool getLight() {
   pinMode(D3, OUTPUT);
   digitalWrite(D3, HIGH);
 
   Wire.begin(D1, D2); // switch pins around
-  if (!tcs.attach(Wire)) {
-    Serial.println("Failed to attach Wire!");
-  } else {
-  
-    tcs.gain(TCS34725::Gain::X01);
+  TCS34725 tcs;
+  if (tcs.attach(Wire)) {
     tcs.enableColorTempAndLuxCalculation(true);
-    TCS34725::RawData raw;
-
-    byte gain = 1;
-    // try up to 600ms
-    // ideal loop with actual cycle multiples of 2.4, each of which is roughly 100ms: round(1:6 * 41.7)*2.4
-    for (byte l = 0; l <= 6; l++) {
-      // calculate good number of cycles
-      float integrationTime = 2.4 * (l == 0 ? 2 : round(41.7 * l));
-      tcs.integrationTime(integrationTime);
-      while (!tcs.available()) {
-        delay(integrationTime / 4);
-      }
-      raw = tcs.raw();
-      if (raw.c >= REQUIRED_COUNT) {
-        break;
-      }
-
-      // TODO check if reliable (saturation?)
-//      TCS34725::Color color = tcs.color();
-//      Serial.print(tcs.lux());
-//      Serial.print(" Lux @ "); Serial.print(tcs.colorTemperature());
-//      Serial.print(" K. "); Serial.print(raw.r);
-//      Serial.print("/"); Serial.print(raw.g);
-//      Serial.print("/"); Serial.print(raw.b);
-//      Serial.print("/"); Serial.print(raw.c);
-//      Serial.print(" -> "); Serial.print(color.r);
-//      Serial.print("/"); Serial.print(color.g);
-//      Serial.print("/"); Serial.println(color.b);
-
-      float fulfillmentPotentialAtCurrentGain = raw.c == 0 ? 60 : integrationTime * REQUIRED_COUNT / (600 * raw.c * gain);
-      // 1, 4, 16, 60
-      if (fulfillmentPotentialAtCurrentGain >= 4) {
-        if (fulfillmentPotentialAtCurrentGain >= 16) {
-          if (fulfillmentPotentialAtCurrentGain >= 60) {
-            tcs.gain(TCS34725::Gain::X60);
-            gain = 60;
-          } else {
-            tcs.gain(TCS34725::Gain::X16);
-            gain = 16;
-          }
-        } else {
-          tcs.gain(TCS34725::Gain::X04);
-          gain = 4;
-        }
-//        Serial.println("Switching gain to ");
-//        Serial.println(gain);
-      }
-    }
-    file.print(gain);
-    file.print(",");
-    file.print(integrationTime);
-    file.print(",");
-    file.print(raw.c);
-    file.print(",");
-    file.print(raw.r);
-    file.print(",");
-    file.print(raw.g);
-    file.print(",");
-    file.print(raw.b);
+    readWithAutoGain(&tcs, 1000);
+  } else {
+    DEBUG_PRINTLN("Failed to attach Wire!");
   }
+  raw = tcs.raw();
   // cut power again
   digitalWrite(D3, LOW);
 
-  data->lux[data->resetCount % N_RECORDS] = tcs.lux();
-  data->cct[data->resetCount % N_RECORDS] = (uint16_t) tcs.colorTemperature();
+  float lux = tcs.lux();
+  uint16_t cct = (uint16_t) tcs.colorTemperature();
+
+  // determine if there is change to the previously logged one
+  // JND of Lux is 7% of current value
+  float relDeltaLux = abs(1.0 - data->lastLux / lux);
+  // JND of Kelvin is ~100 until 4000, ~500 above 5000
+  uint16_t dCct = abs(cct - data->lastCct);
+  // TODO check positive lux instead of raw.c value?
+  if (raw.c > 10 && (relDeltaLux >= .05 || dCct > 100)) {
+    // worth logging
+    data->lastLux = lux;
+    data->lastCct = cct;
+
+    // TODO calculate deep sleep time based on battery voltage
+    // https://electronics.stackexchange.com/questions/32321/lipoly-battery-when-to-stop-draining
+    DEBUG_PRINTLN("Data changed, decreasing interval");
+    data->readInterval = min(max(MIN_INTERVAL, data->readInterval / 2), RESET_INTERVAL);
+    return true;
+  } else {
+    // increase by doubling, max is 10s step
+    data->readInterval = min(data->readInterval + min(data->readInterval, MAX_INCREASE), MAX_INTERVAL);
+    DEBUG_PRINT("Data stationary, increasing interval to ");
+    DEBUG_PRINTLN(data->readInterval / 1e3);
+    // don't log
+    return false;
+  }
 }

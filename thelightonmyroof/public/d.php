@@ -2,6 +2,13 @@
 header('Content-Type:text/plain');
 header('Access-Control-Allow-Origin: *');
 
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && $_GET['bl'] == 'ab') {
+  if (!file_put_contents('lux.txt', fopen('php://input', 'r'), FILE_APPEND)) {
+    header($_SERVER["SERVER_PROTOCOL"] . ' 500 Internal Server Error', true, 500);
+  }
+  exit;
+}
+
 $file = fopen('lux.txt', 'r');
 fseek($file, -80000, SEEK_END);
 
@@ -29,13 +36,16 @@ while (true) {
 
 fseek($file, -strlen($line), SEEK_CUR);
 
-echo "ts,bt,lux,cct,c,r,g,b,v,temp,hum,fails\n";
+echo "ts,bt,lux,cct,c,r,g,b,v,temp,hum,attempt,code\n";
 while (($data = fgetcsv($file, 1000, "\t")) !== FALSE) {
+  if (is_null($data[0])) {
+    continue;
+  }
   if ($data[0] != '') {
     $ts = intval($data[0]);
-  } else if ($data[1] == '0') {
+//  } else if ($data[1] == '0') {
     # some of the formerly invalid non-registered initial boot uploads
-    continue;
+//    continue;
   }
   $now = $ts + intval($data[2]);
   if ($now >= $before) {
@@ -48,13 +58,12 @@ while (($data = fgetcsv($file, 1000, "\t")) !== FALSE) {
   $cct = round(1391 + 3810 * ($data[8] - $ir) / ($data[6] - $ir));
 
   echo $now . '000,' . $data[1] .',' . $lux .',' . $cct;
-  #crgb, v, temp, hum, fails
-  for ($i = 5; $i < 13; $i++) {
+  #crgb, v, temp, hum, attempt, code
+  for ($i = 5; $i < 14; $i++) {
     echo ',' . $data[$i];
   }
 
   echo "\n";
 }
-
 
 ?>

@@ -54,26 +54,16 @@ void setup() {
     DEBUG_PRINTLN(sizeof(*(&nv->rtcData))); // 40
     DEBUG_PRINTLN(sizeof(*(&nv->cache))); // 120 for 6
     DEBUG_PRINTLN(sizeof(*nv)); // 304 for 6
-
-    // TODO fix disconnect bug: https://github.com/esp8266/Arduino/issues/5527
-    // https://github.com/esp8266/Arduino/issues/2235#issuecomment-248916617 says to just call disconnect() beforehand.
-    // connect to wifi
-    getTime();
-    if (data->networkTime == 0) {
-      // buhao
-      data->readInterval = max(data->readInterval, data->readInterval << 1);
-      DEBUG_PRINTLN("Initial clock check failed, scheduling another connection in 2");
-      data->nextUpload += 2;
-    }
   }
 }
 
 void loop() {
   int fileSize = 0;
-  // if it's data worth writing OR we're about to upload OR we haven't written in zonks
-  if (getLight()) {// || shouldUpload() || (data->bootCount % 50) == 0) {
+  // if it's data worth writing OR we're about to upload
+  if (getLight() || shouldUpload()) {
+
     DEBUG_PRINT("Writing to cache slot ");
-    DEBUG_PRINT(data->cacheCount);
+    DEBUG_PRINTLN(data->cacheCount);
     cache[data->cacheCount].bootCount = data->bootCount;
     cache[data->cacheCount].sSinceNetworkTime = (data->msSinceNetworkTime + millis()) / 1000;
     cache[data->cacheCount].gainCyclesV = (gain << 24) | (nCycles << 16) | v;
@@ -82,6 +72,25 @@ void loop() {
 
     // persistence and/or upload
     if (++data->cacheCount == LOG_CACHE || shouldUpload()) {
+
+      if (shouldUpload()) {
+        // TODO fix disconnect bug: https://github.com/esp8266/Arduino/issues/5527
+        // https://github.com/esp8266/Arduino/issues/2235#issuecomment-248916617 says to just
+        // call disconnect() beforehand.
+        WiFi.disconnect();
+      }
+
+      if (data->bootCount == 0) {
+        // connect to wifi to get timestamp before first write
+        getTime();
+        if (data->networkTime == 0) {
+          // buhao
+          data->readInterval = max(data->readInterval, data->readInterval << 1);
+          DEBUG_PRINTLN("Initial clock check failed, scheduling another connection in 2");
+          data->nextUpload += 2;
+        }
+      }
+
       if (!SPIFFS.begin()) {
         DEBUG_PRINTLN("SPIFFS error, shutting down");
         sleep(0);
@@ -96,12 +105,8 @@ void loop() {
         DEBUG_PRINT(" bytes used of total ");
         DEBUG_PRINTLN(info.totalBytes);
       #endif
-      File file = SPIFFS.open(FILE, "a");
 
-      // pre-log timestamp to the first line that will be persisted
-      if (data->bootCount == 0 || file.size() == 0) {
-        file.print(data->msSinceNetworkTime);
-      }
+      File file = SPIFFS.open(FILE, shouldUpload() ? "a+" : "a");
 
       // don't need to get temperature every time -- every 5.something minutes max,
       // and only if we have enough time (3 seconds) between light data reads
@@ -119,18 +124,22 @@ void loop() {
         file.print('\t');
         if (shouldUpload()) {
           file.print(++(data->uploadAttempt));
+          // leave last line open for possible error code
+          file.print('\t');
+        } else {
+          file.println('\t');
         }
-        file.println();
       }
     
       fileSize = file.size();
-      file.close();
     
       // at 5k filesize constraint and 40 sec write interval there was one upload every ~1.2 hours,
       // each of which triggered the battery to recharge again.
-      if (shouldUpload()) {
+      if (!shouldUpload()) {
+        file.close();
+      } else {
         digitalWrite(D4, false);
-        if (uploadFile() != 0) {
+        if (uploadFile(&file) != 0) {
           fileSize = 0;
           data->uploadAttempt = 0;
         } else {
@@ -148,7 +157,7 @@ void loop() {
       data->readInterval > 10e3 && // at least 10s read interval so we don't mess up dense readings
       // consider next upload time -- 50KB size or 1 hour, whichever comes first
       (fileSize > 50000 || data->msSinceNetworkTime >= 60*60e3)) {
-    DEBUG_PRINTLN("Attempting to queue upload at next reboot");
+    DEBUG_PRINTLN("Queue upload attempt at next reboot");
     setNextUpload(data->bootCount + 1);
   }
 

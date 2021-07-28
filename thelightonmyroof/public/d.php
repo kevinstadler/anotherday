@@ -17,7 +17,7 @@ $cur = $before; // run through loop at least once
 
 while (true) {
   # seek to end of line
-  if (fgets($file) == false) {
+  if (fgets($file, 100) == false) {
     break;
   }
   # seek to first timestamped line
@@ -29,7 +29,7 @@ while (true) {
   $cur = intval($line);
 //  echo $cur . "\n";
 
-  if (fseek($file, -160000, SEEK_CUR) != 0) {
+  if (!ftell($file) || fseek($file, -min(ftell($file), 160000), SEEK_CUR) != 0) {
     break;
   }
 }

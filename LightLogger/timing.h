@@ -27,14 +27,14 @@ void sleep(uint32_t ms) {
     DEBUG_PRINTLN(" reboots");
   }
 
-  data->bootCount++;
+  nv->rtcData.bootCount++;
   if (data->nextUpload == data->bootCount) {
     DEBUG_PRINTLN("Upload attempt on next wake!");
   }
   #ifdef DEBUG
     Serial.flush();
   #endif
-  data->msSinceNetworkTime += millis() + ms;
+  nv->rtcData.msSinceNetworkTime += millis() + ms;
   ESP.deepSleep(ms * 1e3, (data->nextUpload == data->bootCount) ? WAKE_RF_DEFAULT : WAKE_RF_DISABLED); //WAKE_NO_RFCAL
 }
 
@@ -45,9 +45,9 @@ void sleep() {
 
 void setNetworkTime(uint32_t time) {
   if (time != 0) {
-    data->nextAir -= data->msSinceNetworkTime;
-    data->msSinceNetworkTime = -millis();
-    data->networkTime = time;
+    nv->rtcData.nextAir -= data->msSinceNetworkTime;
+    nv->rtcData.msSinceNetworkTime = -millis();
+    nv->rtcData.networkTime = time;
   }
 }
 

@@ -1,5 +1,6 @@
 // file persistence
-#include <FS.h>
+//#include <FS.h>
+#include <LittleFS.h>
 #define FILE "/light.txt"
 
 // functions for transferring rtc log cache to spiffs
@@ -46,38 +47,51 @@ void persistCache(File *file, bool leaveOpen = false) {
     // TODO test if this is enough newlines everywhere
     // TODO newline required before new timestamp
   }
-  data->cacheCount = 0;
+  nv->rtcData.cacheCount = 0;
 }
 
 // FIXME write() writes the raw byte instead of a string representation??
 
-// if successful, returns the current timestamp returned by the logging service
-uint32_t uploadFile(File *file) {
-  uint32_t ret = 0;
+bool uploadFile(File *file) {
+  int32_t code = -999;
+  digitalWrite(D4, LOW);
   if (startWifi()) {
+    WiFiClient stream;
     HTTPClient http;
     DEBUG_PRINT("Sending HTTP request...");
-    http.begin("http://192.168.2.2:8000/cgi-bin/log.py?file=lux.txt&mode=a&currentTimeEstimate=" + String(currentTime()));
+    http.begin(stream, "http://192.168.2.2:8000/cgi-bin/log.py?file=lux.txt&mode=a&currentTimeEstimate=" + String(currentTime()));
     // on SPIFFS, read and write pointer apparently share position..
     file->seek(0);
-    int code = http.sendRequest("POST", file, file->size());
-    if (code != HTTP_CODE_OK) {
-      DEBUG_PRINT("error: ");
-      DEBUG_PRINTLN(code);
-      // write error code+newline to file
-      file->println(code);
-      file->close();
-    } else {
-      ret = http.getStream().parseInt();
-      DEBUG_PRINT("success. new timestamp: ");
-      DEBUG_PRINTLN(ret);
-      setNetworkTime(ret);
-      // truncate file
-      file->close();
-      SPIFFS.open(FILE, "w").close();
+    code = http.sendRequest("POST", file, file->size());
+    if (code == HTTP_CODE_OK) {
+      uint32_t ts = http.getString().toInt();
+      if (ts < data->networkTime) { // don't accept timestamps in the past (or 0)
+        DEBUG_PRINT("HTTP request succeeded but timestamp is devious, assuming data not saved.");
+        code = -666;
+      } else {
+        DEBUG_PRINT("success. new timestamp: ");
+        DEBUG_PRINTLN(ts);
+        setNetworkTime(ts);
+      }
     }
     http.end();
+  } else {
+    code = WiFi.status();
   }
   stopWifi();
-  return ret;
+  digitalWrite(D4, HIGH);
+
+  if (code != HTTP_CODE_OK) {
+    // write error code+newline to file
+    DEBUG_PRINT("error: ");
+    DEBUG_PRINTLN(code);
+    file->println(code);
+    file->close();
+    return false;
+  } else {
+    // truncate file
+    file->close();
+    LittleFS.open(FILE, "w").close();
+    return true;
+  }
 }

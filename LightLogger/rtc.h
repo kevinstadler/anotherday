@@ -39,12 +39,14 @@ struct nv_s {
   LogRecord cache[LOG_CACHE];
 };
 static nv_s* nv = (nv_s*) RTC_USER_MEM; // user RTC RAM area
+
+// since Arduino 3.*, THESE TWO STRUCTURES WORK FOR READING ONLY
 static RtcData *data = &nv->rtcData;
 static LogRecord *cache = nv->cache;
 
 void setNextUpload(uint32_t nextUpload) {
   // only allow *increasing* this value
-  data->nextUpload = max(nextUpload, data->nextUpload);
+  nv->rtcData.nextUpload = max(nextUpload, data->nextUpload);
 }
 
 bool shouldUpload() {

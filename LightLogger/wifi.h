@@ -14,7 +14,7 @@ bool startWifi() {
 //  } else {
     DEBUG_PRINT("Connecting to WiFi...");
     WiFi.persistent(false);  // don't store the connection each time to save wear on the flash
-    WiFi.setAutoConnect(false);
+//    WiFi.setAutoConnect(false);
     WiFi.mode(WIFI_STA);
     WiFi.config(IPAddress(192, 168, 2, 50), IPAddress(192, 168, 2, 1), IPAddress(255, 255, 255, 0));
     WiFi.begin("QT", "quokkathedog");
@@ -38,18 +38,19 @@ void stopWifi() {
 
 void getTime() {
   if (startWifi()) {
+    WiFiClient stream;
     HTTPClient http;
-    http.begin("http://192.168.2.2:8000/cgi-bin/log.py");
+    http.begin(stream, "http://192.168.2.2:8000/cgi-bin/log.py");
     uint16_t r = http.GET();
     if (r == HTTP_CODE_OK) {
-      // this will start working from v3
-      //ret = http.getString().toInt();
-      setNetworkTime(http.getStream().parseInt());
-//      DEBUG_PRINT("Network time is ");
+      // until 2.7: http.getStream().parseInt());
+      // this will start working from v3:
+      setNetworkTime(http.getString().toInt());
+      DEBUG_PRINT("Network time is ");
       DEBUG_PRINTLN(data->networkTime);
     } else {
+      DEBUG_PRINT("HTTP response not ok: ");
       DEBUG_PRINTLN(r);
-      DEBUG_PRINTLN("HTTP response not ok");
     }
     http.end();
   }

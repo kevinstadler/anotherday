@@ -29,23 +29,23 @@ bool getLight() {
 
   // determine if there is change to the previously logged one
   // JND of Lux is 7% of current value
-  float relDeltaLux = abs(1.0 - data->lastLux / lux);
+  float relDeltaLux = abs((float) 1.0 - nv->rtcData.lastLux / lux);
   // JND of Kelvin is ~100 until 4000, ~500 above 5000
-  uint16_t dCct = abs(cct - data->lastCct);
+  uint16_t dCct = abs((uint16_t) (cct - nv->rtcData.lastCct));
   // TODO check positive lux instead of raw.c value?
   if (raw.c > 10 && (relDeltaLux >= .05 || dCct > 100)) {
     // worth logging
-    data->lastLux = lux;
-    data->lastCct = cct;
+    nv->rtcData.lastLux = lux;
+    nv->rtcData.lastCct = cct;
 
     // TODO calculate deep sleep time based on battery voltage
     // https://electronics.stackexchange.com/questions/32321/lipoly-battery-when-to-stop-draining
     DEBUG_PRINTLN("Data changed, decreasing interval");
-    data->readInterval = min(max(MIN_INTERVAL, data->readInterval / 2), RESET_INTERVAL);
+    nv->rtcData.readInterval = min(max(MIN_INTERVAL, data->readInterval / 2), RESET_INTERVAL);
     return true;
   } else {
     // increase by doubling, max is 10s step
-    data->readInterval = min(data->readInterval + min(data->readInterval, MAX_INCREASE), MAX_INTERVAL);
+    nv->rtcData.readInterval = min(data->readInterval + min(data->readInterval, MAX_INCREASE), MAX_INTERVAL);
     DEBUG_PRINT("Data stationary, increasing interval to ");
     DEBUG_PRINTLN(data->readInterval / 1e3);
     // don't log

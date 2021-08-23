@@ -25,35 +25,37 @@ TempAndHumidity dhtData;
 uint16_t v;
 
 void setup() {
-  // if voltage is too low, go straight to sleep for an hour
-  v = getVoltage();
-  if (v < 700) {
-    sleep(60*MINUTE);
-  }
-
   #ifdef DEBUG
     Serial.begin(115200);
     Serial.println();
   #endif
  
+  // if voltage is too low, go straight to sleep for an hour
+  v = getVoltage();
+/*  if (v < 700) {
+    DEBUG_PRINTLN("Low power");
+    sleep(60*MINUTE);
+  }*/
+
   if (!ESP.getResetReason().equals("Deep-Sleep Wake")) {
     DEBUG_PRINTLN("Looks like first boot, initialising.");
     delay(2000); // give some time to flash
-    data->networkTime = 0;
-    data->msSinceNetworkTime = - millis();
-    data->bootCount = 0;
-    data->nextUpload = 0;
-    data->nextAir = 0;
-    data->readInterval = RESET_INTERVAL;
-    data->lastLux = 0;
-    data->lastCct = 0;
-    data->uploadAttempt = 0;
-    data->cacheCount = 0;
-
+    nv->rtcData.networkTime = 0;
+    nv->rtcData.msSinceNetworkTime = - millis();
+    nv->rtcData.bootCount = 0;
+    nv->rtcData.nextUpload = 0;
+    nv->rtcData.nextAir = 0;
+    nv->rtcData.readInterval = RESET_INTERVAL;
+    nv->rtcData.lastLux = 0;
+    nv->rtcData.lastCct = 0;
+    nv->rtcData.uploadAttempt = 0;
+    nv->rtcData.cacheCount = 0;
 //    DEBUG_PRINTLN(sizeof(*(&nv->wss))); // 152
-    DEBUG_PRINTLN(sizeof(*(&nv->rtcData))); // 40
-    DEBUG_PRINTLN(sizeof(*(&nv->cache))); // 120 for 6
-    DEBUG_PRINTLN(sizeof(*nv)); // 304 for 6
+//    DEBUG_PRINTLN(sizeof(*(&nv->rtcData))); // 40
+//    DEBUG_PRINTLN(sizeof(*(&nv->cache))); // 120 for 6
+//    DEBUG_PRINTLN(sizeof(*nv)); // 304 for 6
+//    DEBUG_PRINT("Wiping FS....");
+//    DEBUG_PRINTLN(LittleFS.format() ? "success!" : "failed!");
   }
 }
 
@@ -64,14 +66,14 @@ void loop() {
 
     DEBUG_PRINT("Writing to cache slot ");
     DEBUG_PRINTLN(data->cacheCount);
-    cache[data->cacheCount].bootCount = data->bootCount;
-    cache[data->cacheCount].sSinceNetworkTime = (data->msSinceNetworkTime + millis()) / 1000;
-    cache[data->cacheCount].gainCyclesV = (gain << 24) | (nCycles << 16) | v;
-    cache[data->cacheCount].cr = (raw.c << 16) | raw.r;
-    cache[data->cacheCount].gb = (raw.g << 16) | raw.b;
+    nv->cache[data->cacheCount].bootCount = data->bootCount;
+    nv->cache[data->cacheCount].sSinceNetworkTime = (data->msSinceNetworkTime + millis()) / 1000;
+    nv->cache[data->cacheCount].gainCyclesV = (gain << 24) | (nCycles << 16) | v;
+    nv->cache[data->cacheCount].cr = (raw.c << 16) | raw.r;
+    nv->cache[data->cacheCount].gb = (raw.g << 16) | raw.b;
 
     // persistence and/or upload
-    if (++data->cacheCount == LOG_CACHE || shouldUpload()) {
+    if (++(nv->rtcData.cacheCount) == LOG_CACHE || shouldUpload()) {
 
       if (shouldUpload()) {
         // TODO fix disconnect bug: https://github.com/esp8266/Arduino/issues/5527
@@ -82,31 +84,32 @@ void loop() {
 
       if (data->bootCount == 0) {
         // connect to wifi to get timestamp before first write
+        DEBUG_PRINTLN("Getting initial network time");
         getTime();
         if (data->networkTime == 0) {
           // buhao
-          data->readInterval = max(data->readInterval, data->readInterval << 1);
+          nv->rtcData.readInterval = max(data->readInterval, data->readInterval << 1);
           DEBUG_PRINTLN("Initial clock check failed, scheduling another connection in 2");
-          data->nextUpload += 2;
+          nv->rtcData.nextUpload += 2;
         }
       }
 
-      if (!SPIFFS.begin()) {
-        DEBUG_PRINTLN("SPIFFS error, shutting down");
+      if (!LittleFS.begin()) {
+        DEBUG_PRINTLN("FS error, shutting down");
         sleep(0);
       }
       DEBUG_PRINTLN("Persisting cache");
 
       #ifdef DEBUG
         FSInfo info;
-        SPIFFS.info(info);
-        DEBUG_PRINT("SPIFFS status: ");
+        LittleFS.info(info);
+        DEBUG_PRINT("FS status: ");
         DEBUG_PRINT(info.usedBytes);
         DEBUG_PRINT(" bytes used of total ");
         DEBUG_PRINTLN(info.totalBytes);
       #endif
 
-      File file = SPIFFS.open(FILE, shouldUpload() ? "a+" : "a");
+      File file = LittleFS.open(FILE, shouldUpload() ? "a+" : "a");
 
       // don't need to get temperature every time -- every 5.something minutes max,
       // and only if we have enough time (3 seconds) between light data reads
@@ -120,10 +123,10 @@ void loop() {
         file.print(dhtData.temperature);
         file.print('\t');
         file.print((int16_t) dhtData.humidity);
-        data->nextAir = data->msSinceNetworkTime + AIR_INTERVAL;
+        nv->rtcData.nextAir = data->msSinceNetworkTime + AIR_INTERVAL;
         file.print('\t');
         if (shouldUpload()) {
-          file.print(++(data->uploadAttempt));
+          file.print(++(nv->rtcData.uploadAttempt));
           // leave last line open for possible error code
           file.print('\t');
         } else {
@@ -139,16 +142,16 @@ void loop() {
         file.close();
       } else {
         digitalWrite(D4, false);
-        if (uploadFile(&file) != 0) {
+        if (uploadFile(&file)) {
           fileSize = 0;
-          data->uploadAttempt = 0;
+          nv->rtcData.uploadAttempt = 0;
         } else {
           // exponentially delay upload
           setNextUpload(data->nextUpload + ( data->uploadAttempt >= 32 ? 255 : (1 << data->uploadAttempt)));
         }
         digitalWrite(D4, true);
       }
-      SPIFFS.end();
+      LittleFS.end();
     }
   }
 

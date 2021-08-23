@@ -1,10 +1,10 @@
-#include "TCS34725.h"
+//#include "TCS34725.h"
 #include "TCS34725AutoGain.h"
 TCS34725 tcs;
 
 bool hasTCS() {
   Wire.begin();
-  return tcs.attach(Wire);
+  return tcs.attach(Wire, TCS34725::Mode::Idle);
 }
 
 void calibrate() {
@@ -13,14 +13,16 @@ void calibrate() {
     // from warm (low temp) to cold
     analogWrite(CW, i * brightest / MIXRESOLUTION);
     analogWrite(WW, (MIXRESOLUTION - i - 1) * brightest / MIXRESOLUTION);
-    readWithAutoGain(&tcs);
+    delay(50);
+    tcs.autoGain(1000);
     kelvinPerMix[i] = tcs.colorTemperature();
     DEBUG_PRINTLN(kelvinPerMix[i]);
   }
   for (byte i = 0; i < PWMRESOLUTION; i++) {
     analogWrite(CW, 0);
     analogWrite(WW, PWM[i]);
-    readWithAutoGain(&tcs);
+    delay(50);
+    tcs.autoGain(1000);
     luxPerPWM[i] = tcs.lux();
     DEBUG_PRINTLN(luxPerPWM[i]);
   }

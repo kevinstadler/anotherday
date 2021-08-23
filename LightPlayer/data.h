@@ -34,8 +34,8 @@ void loadData() {
   ndata--;
   DEBUG_PRINT(ndata);
   DEBUG_PRINT(" records spanning ");
-  DEBUG_PRINT((data[ndata - 1].ts - data[0].ts)/60);
-  DEBUG_PRINTLN(" minutes");
+  DEBUG_PRINT((data[ndata - 1].ts - data[0].ts)/3600.0);
+  DEBUG_PRINTLN(" hours");
 
   // check if current network time is somehow out of bounds
   if (now() < data[ndata - 1].ts) {
@@ -52,13 +52,13 @@ bool downloadData() {
   // TODO switch to async
   // https://github.com/boblemaire/asyncHTTPrequest
   // with callback: https://github.com/khoih-prog/AsyncHTTPRequest_Generic/blob/master/examples/AsyncHTTPRequest_ESP/AsyncHTTPRequest_ESP.ino
+  WiFiClient in;
   HTTPClient http;
-  http.begin("http://192.168.2.2:8000/cgi-bin/light.py");
+  http.begin(in, "http://192.168.2.2:8000/cgi-bin/light.py");
   if (http.GET() != HTTP_CODE_OK) {
     DEBUG_PRINTLN("HTTP status not OK");
     return false;
   }
-  WiFiClient in = http.getStream();
   DEBUG_PRINT("Received ");
   DEBUG_PRINT(in.available());
   DEBUG_PRINTLN(" bytes");

@@ -43,8 +43,6 @@ void setup() {
     matrix.setColumn(col, 0x00);
   }
 
-  analogWrite(CW, 0);
-  analogWrite(WW, 0);
 //  analogWriteResolution(PWM_BITS);
 //  analogWriteRange(0xFFFF >> (16 - PWM_BITS));
 //  analogWriteFreq(0xFFFF >> (14 - PWM_BITS));
@@ -61,7 +59,9 @@ void setup() {
 
   loadLookupTable();
   loadData();
+  setUserOffset(readPoti() * 10);
   calculateSteps();
+  displayOffset();
 }
 
 #define LOOPINTERVAL 50 // ms
@@ -76,21 +76,26 @@ void loop() {
 
   if (newPoti != poti) {
     // A0 can read 10 bit resolution (up to 1023), drop down to 5 bit to be more resistant to noise
-    poti = newPoti;
     DEBUG_PRINTLN();
-    DEBUG_PRINT("Poti setting has changed, is now ");
+    DEBUG_PRINT("Poti ");
     DEBUG_PRINT(poti);
-    DEBUG_PRINT(", updating offset to ");
+    DEBUG_PRINT(" -> ");
+    DEBUG_PRINT(newPoti);
+    DEBUG_PRINT(", offset ");
+    poti = newPoti;
     // change/discontinuity in replayoffset
     // 32 poti levels * 15 minutes each = 480m = 8h (+1h base offset)
     // 30 poti levels * 10 minutes each = 300m = 5h (+1h base offset)
+    DEBUG_PRINT(userOffset/60); // print in minutes
+    DEBUG_PRINT(" -> ");
     setUserOffset(newPoti * 10);
     DEBUG_PRINTLN(userOffset/60); // print in minutes
     uint32_t targetTime = getTargetTime();
     if (targetTime < data[0].ts || targetTime > data[ndata-1].ts) {
-      DEBUG_PRINTLN("OUT OF RANGE, increasing data offset");
+      DEBUG_PRINT("OUT OF RANGE, increasing data offset: ");
       // += because the current dataOffset is included in the targetTime, plus 1 minute headroom
       dataOffset += 60 + targetTime - data[ndata-1].ts;
+      DEBUG_PRINTLN(dataOffset);
     }
     calculateSteps();
     displayOffset();
@@ -103,15 +108,20 @@ void loop() {
   if (millis() >= nextStepTime) {
     uint32_t targetTime = getTargetTime();
     if (targetTime >= data[i+1].ts) {
-      DEBUG_PRINTLN();
-      i = (i+1) % (ndata - 1);
-      calculateSteps(false);
+      if (i == ndata - 1) {
+        DEBUG_PRINTLN("Reached the end, increasing dataOffset by however much");
+        dataOffset += data[i-1].ts - data[i-2].ts;
+      } else {
+        i++;
+        calculateSteps(false);
+      }
     }
 
     nextStepTime += stepDuration;
     setLight(((nSteps - currentStep) * data[i].illuminance + currentStep * data[i+1].illuminance) / nSteps,
       ((nSteps - currentStep) * data[i].cct + currentStep * data[i+1].cct) / nSteps);
-    currentStep++;
+    DEBUG_PRINT(' ');
+    DEBUG_PRINT(currentStep++);
   }
 
   int32_t waitLeft = LOOPINTERVAL - (millis() - m);
@@ -136,8 +146,8 @@ void loop() {
     // even if download didn't give new data, networktime might have changed!
     calculateSteps();
     DEBUG_PRINT("Working with data that is ");
-    DEBUG_PRINT((now() - data[ndata - 1].ts)/60);
-    DEBUG_PRINTLN(" minutes old.");
+    DEBUG_PRINT((now() - data[ndata - 1].ts)/3600.0);
+    DEBUG_PRINTLN(" hours old.");
     waitLeft = LOOPINTERVAL - (millis() - m);
   }
 

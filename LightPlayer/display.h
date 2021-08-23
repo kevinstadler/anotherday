@@ -6,12 +6,16 @@ MD_MAX72XX matrix(MD_MAX72XX::FC16_HW, 16, 12, 14, 4);
 uint32_t lastDisplayed;
 
 void displayOffset() {
-  // FIXME should include the data offset in this really?
-  uint8_t hours = userOffset / 3600;
-  uint16_t minutes = ( userOffset / 60 ) % 60;
+  // display userOffset + dataOffset together
+  uint32_t offset = dataOffset + userOffset;
+  uint8_t days = offset / 62400;
+  uint8_t hours = (offset / 3600) % 24;
+  uint16_t minutes = ( offset / 60 ) % 60;
   char strng[10];
   uint8_t len;
-  if (hours == 0) {
+  if (days > 0) {
+    len = sprintf(strng, "%dd %dh", days, hours);
+  } else if (hours == 0) {
     len = sprintf(strng, "%dm ago", minutes);
   } else if (minutes == 0) {
     len = sprintf(strng, "%dh ago", hours);

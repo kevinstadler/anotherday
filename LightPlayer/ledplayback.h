@@ -16,7 +16,7 @@ byte readPoti() {
   return analogRead(A0) >> 5;
 }
 
-uint16_t poti = 0;
+uint16_t poti;
 
 void setUserOffset(uint16_t minutes) {
   userOffset = (60 + minutes) * MINUTE;
@@ -49,10 +49,18 @@ void calculateSteps(bool seekIndex = true) {
     DEBUG_PRINT(data[i+1].ts);
     DEBUG_PRINTLN(")");
   }
-  DEBUG_PRINT("i=");
+  // should be in [0,999]
+  uint32_t progress = (1000 * (targetTime - data[i].ts)) / (data[i+1].ts - data[i].ts);
+
+  DEBUG_PRINT("\n\ni=");
   DEBUG_PRINT(i);
-  DEBUG_PRINT("/");
+  DEBUG_PRINT('.');
+  DEBUG_PRINT(progress);
+  DEBUG_PRINT('/');
   DEBUG_PRINT(ndata-1);
+  DEBUG_PRINT(" (");
+  DEBUG_PRINT(data[i+1].ts - data[i].ts);
+  DEBUG_PRINT("s)");
   DEBUG_PRINT(": ");
   DEBUG_PRINT(data[i].illuminance);
   DEBUG_PRINT("lux @ ");
@@ -61,13 +69,8 @@ void calculateSteps(bool seekIndex = true) {
   DEBUG_PRINT(data[i+1].illuminance);
   DEBUG_PRINT("lux @ ");
   DEBUG_PRINT(data[i+1].cct);
-  DEBUG_PRINT("K (progress ");
-  // should be in [0,999]
-  uint32_t progress = (1000 * (targetTime - data[i].ts)) / (data[i+1].ts - data[i].ts);
-  DEBUG_PRINT(progress);
-  DEBUG_PRINT("/1000 of ");
-  DEBUG_PRINT(data[i+1].ts - data[i].ts);
-  DEBUG_PRINT("s) => ");
+  DEBUG_PRINT("K => ");
+
   float illuminance = ((1000 - progress) * data[i].illuminance + progress * data[i+1].illuminance) / 1000;
   uint16_t cct = ((1000 - progress) * data[i].cct + progress * data[i+1].cct) / 1000;
   // don't need to have more steps than the difference in pwm levels or cct JND (no more than 100)

@@ -5,7 +5,7 @@
 uint16_t PWM[PWMRESOLUTION];
 float luxPerPWM[PWMRESOLUTION];
 
-#define MIXRESOLUTION 5
+#define MIXRESOLUTION 9
 float kelvinPerMix[MIXRESOLUTION];
 
 #include "ledcalibration.h"
@@ -92,7 +92,8 @@ float interpolate(float pos, uint16_t *values) {
 
 // maps lux to [0, 1023] PWM cycle interval
 uint16_t lookupPWM(float lux) {
-  return round(interpolate(getPosition(lux, luxPerPWM, PWMRESOLUTION), PWM));
+  // ceil so we get at least 1
+  return ceil(interpolate(getPosition(lux, luxPerPWM, PWMRESOLUTION), PWM));
 }
 
 // maps CCT to float fraction of 'cold' (high temperature) LED
@@ -103,15 +104,6 @@ float lookupColdPortion(uint16_t kelvin) {
 void setLight(float lux, uint16_t cct) {
   uint16_t intensity = lookupPWM(lux);
   float cold = lookupColdPortion(cct);
-  DEBUG_PRINT(" -> ");
-  DEBUG_PRINT(lux);
-  DEBUG_PRINT("lux @ ");
-  DEBUG_PRINT(cct);
-  DEBUG_PRINT("K (");
-  DEBUG_PRINT(cold * intensity);
-  DEBUG_PRINT("/");
-  DEBUG_PRINT((1 - cold) * intensity);
-  DEBUG_PRINT(")");
-  targetCold = round(cold * intensity);
-  targetWarm = round((1 - cold) * intensity);
+  targetCold = ceil(cold * intensity);
+  targetWarm = ceil((1 - cold) * intensity);
 }

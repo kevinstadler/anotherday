@@ -25,13 +25,13 @@ bool getLight() {
   digitalWrite(D3, LOW);
 
   float lux = tcs.lux();
-  uint16_t cct = (uint16_t) tcs.colorTemperature();
+  int32_t cct = tcs.colorTemperature();
 
   // determine if there is change to the previously logged one
   // JND of Lux is 7% of current value
-  float relDeltaLux = abs((float) 1.0 - nv->rtcData.lastLux / lux);
+  float relDeltaLux = abs(1.0 - nv->rtcData.lastLux / lux);
   // JND of Kelvin is ~100 until 4000, ~500 above 5000
-  uint16_t dCct = abs((uint16_t) (cct - nv->rtcData.lastCct));
+  int32_t dCct = abs(cct - (int32_t) nv->rtcData.lastCct);
   // TODO check positive lux instead of raw.c value?
   if (raw.c > 10 && (relDeltaLux >= .05 || dCct > 100)) {
     // worth logging

@@ -147,7 +147,7 @@ void loop() {
           nv->rtcData.uploadAttempt = 0;
         } else {
           // exponentially delay upload
-          setNextUpload(data->nextUpload + ( data->uploadAttempt >= 32 ? 255 : (1 << data->uploadAttempt)));
+          setNextUpload(data->nextUpload + ( data->uploadAttempt >= 8 ? 255 : (1 << data->uploadAttempt)));
         }
         digitalWrite(D4, true);
       }

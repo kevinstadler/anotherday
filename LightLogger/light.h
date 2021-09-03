@@ -29,11 +29,17 @@ bool getLight() {
 
   // determine if there is change to the previously logged one
   // JND of Lux is 7% of current value
+  float deltaLux = abs(nv->rtcData.lastLux - lux);
   float relDeltaLux = abs(1.0 - nv->rtcData.lastLux / lux);
   // JND of Kelvin is ~100 until 4000, ~500 above 5000
   int32_t dCct = abs(cct - (int32_t) nv->rtcData.lastCct);
   // TODO check positive lux instead of raw.c value?
-  if (raw.c > 10 && (relDeltaLux >= .05 || dCct > 100)) {
+  DEBUG_PRINTLN(raw.c);
+  DEBUG_PRINTLN(lux);
+  DEBUG_PRINTLN(relDeltaLux);
+  DEBUG_PRINTLN(nv->rtcData.lastCct);
+  DEBUG_PRINTLN(cct);
+  if ((deltaLux > .1 && relDeltaLux >= .05) || (lux >= .3 && dCct > 100)) {
     // worth logging
     nv->rtcData.lastLux = lux;
     nv->rtcData.lastCct = cct;

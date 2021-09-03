@@ -51,7 +51,7 @@ Suggested workarounds which did not seem to work for me:
 
 #### LightPlayer
 
-With 2 PWM outputs for the LEDs, 3 pins for the MAX7219 display and 2 pins for the TCS34725 (I2C, technically only needed during calibration) the ESP8266 was already running out of pins. Luckily the [`MD_MAX72XX` library](https://github.com/MajicDesigns/MD_MAX72XX) supports software SPI on arbitrary pins, meaning that one of the SPI pins can be moved to the otherwise useless (non-PWM, non-I2C) pin `D0` (`GPIO16`).
+With 2 PWM outputs for the LEDs, 3 pins for the MAX7219 display and 2 pins for the TCS34725 (I2C, technically only needed during calibration) the ESP8266 was already running out of pins. Luckily the [`MD_MAX72XX` library](https://github.com/MajicDesigns/MD_MAX72XX) supports software SPI on arbitrary pins, meaning that one of the SPI pins can be moved to the otherwise useless (non-PWM, non-I2C) pin `GPIO16`.
 
 * 2x PWM outputs: `D7` (`GPIO13`, 8th on Uno shield) to middle cable, `D8` (`GPIO15` is 11th??? on Uno shield) to outer cable)
 * potentiometer dial input (`A0`)
@@ -92,7 +92,27 @@ To catch lightning: "the average duration is 0.2 seconds made up from a number o
 Only two differences to Mk1:
 
 * switch away from Arduino software PWM to use `new_pwm` with 100Hz PWM frequency (based on [this analysis](https://kevinstadler.github.io/notes/esp8266-software-pwm-comparison-12v-led-strips/))
-* no linear interpolation between datapoints, jump straight to next value (which should be less than just noticably different anyway)
+* no linear interpolation between datapoints, jump straight to next value (which, based on the improved logging regime, should be less than just noticably different anyway)
+
+### Pin assignment
+
+* D0 = GPIO3 = RX
+* D1 = GPIO1 = TX
+* D2 = GPIO16 = MD_MAX72xx DIN
+* D3/D15 = GPIO5 = MD_MAX72xx
+* D4/D14 = GPIO4 = MD_MAX72xx
+* D5/D13 = GPIO14 = TCS34725 SDA
+* D6/D12 = GPIO12 = WW (attached on D12)
+* D7/D11 = GPIO13 = TCS34725 SCL
+
+* D8 = GPIO0 = TCS34725 3.3V
+* D9 = GPIO2 = LED/unused
+* D10 = GPIO15 = CW LED
+
+#### Transistor input spike observations
+
+* WW (`GPIO12`) spiked a little bit, 20k pulldown resistor did the trick
+* CW (`GPIO15`) did not spike, UNTIL the extra TCS got attached to `GPIO14` and `GPIO13`, then *significant* spike on turn-on!
 
 ## `thelightonmyroof`
 
